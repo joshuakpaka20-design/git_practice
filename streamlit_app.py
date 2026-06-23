@@ -138,6 +138,334 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 # =============================
+# ADVANCED VISUALIZATION TOOLS
+# =============================
+
+class AdvancedCharts:
+    """Advanced charting and visualization utilities"""
+    
+    @staticmethod
+    def create_sankey_diagram(df: pd.DataFrame):
+        """Create Sankey diagram for trade flow (Country -> Category -> Profit Range)"""
+        try:
+            # Prepare data
+            df_filtered = df.head(500).copy()
+            
+            source = df_filtered['SourceCountry'].tolist()
+            category = df_filtered['Category'].tolist()
+            profit_range = pd.cut(df_filtered['ProfitUSD'], 
+                                 bins=3, 
+                                 labels=['Low Profit', 'Medium Profit', 'High Profit']).tolist()
+            
+            # Create unique nodes
+            countries = list(set(source))
+            categories = list(set(category))
+            profit_ranges = ['Low Profit', 'Medium Profit', 'High Profit']
+            
+            all_nodes = countries + categories + profit_ranges
+            node_indices = {node: idx for idx, node in enumerate(all_nodes)}
+            
+            # Create links
+            source_indices = [node_indices[s] for s in source]
+            target_indices = [node_indices[c] for c in category]
+            
+            fig = go.Figure(data=[go.Sankey(
+                node=dict(
+                    pad=15,
+                    thickness=20,
+                    line=dict(color='black', width=0.5),
+                    label=all_nodes,
+                    color=['#1f77b4' if node in countries else '#ff7f0e' if node in categories else '#2ca02c' 
+                           for node in all_nodes]
+                ),
+                link=dict(
+                    source=source_indices,
+                    target=target_indices,
+                    value=[1] * len(source_indices)
+                )
+            )])
+            fig.update_layout(title="Trade Flow: Country → Category Analysis", 
+                            height=600, font=dict(size=11))
+            return fig
+        except Exception as e:
+            st.warning(f"Sankey diagram creation failed: {e}")
+            return None
+    
+    @staticmethod
+    def create_sunburst_chart(df: pd.DataFrame):
+        """Create hierarchical sunburst chart"""
+        try:
+            # Aggregate data by Country and Category
+            agg_data = df.groupby(['SourceCountry', 'Category']).agg({
+                'ProductID': 'count',
+                'ProfitUSD': 'sum',
+                'ProfitMargin': 'mean'
+            }).reset_index()
+            agg_data.columns = ['Country', 'Category', 'Products', 'TotalProfit', 'AvgMargin']
+            
+            fig = px.sunburst(agg_data,
+                            labels=['All'] + agg_data['Country'].tolist() + agg_data['Category'].tolist(),
+                            parents=[''] + ['All'] * len(agg_data['Country'].unique()) + 
+                                   agg_data['Country'].tolist(),
+                            values=[agg_data['Products'].sum()] + 
+                                  [agg_data[agg_data['Country']==c]['Products'].sum() 
+                                   for c in agg_data['Country'].unique()] +
+                                  agg_data['Products'].tolist(),
+                            color='AvgMargin',
+                            color_continuous_scale='RdYlGn',
+                            title='Trade Hierarchy: Countries & Categories')
+            fig.update_layout(height=700)
+            return fig
+        except Exception as e:
+            st.warning(f"Sunburst chart creation failed: {e}")
+            return None
+    
+    @staticmethod
+    def create_bubble_chart(df: pd.DataFrame):
+        """Create advanced bubble chart with 4 dimensions"""
+        try:
+            df_bubble = df.sample(min(500, len(df))).copy()
+            
+            fig = px.scatter(df_bubble,
+                           x='ImportCostUSD',
+                           y='ProfitMargin',
+                           size='DemandScore',
+                           color='OpportunityScore',
+                           hover_name='ProductName',
+                           hover_data=['Category', 'SourceCountry', 'ProfitUSD'],
+                           size_max=50,
+                           color_continuous_scale='Viridis',
+                           title='4D Trade Analysis: Cost vs Margin vs Demand vs Opportunity',
+                           labels={'ImportCostUSD': 'Import Cost (USD)',
+                                  'ProfitMargin': 'Profit Margin (%)',
+                                  'DemandScore': 'Demand Score',
+                                  'OpportunityScore': 'Opportunity Score'})
+            fig.update_layout(height=600)
+            return fig
+        except Exception as e:
+            st.warning(f"Bubble chart creation failed: {e}")
+            return None
+    
+    @staticmethod
+    def create_heatmap(df: pd.DataFrame):
+        """Create correlation heatmap for key metrics"""
+        try:
+            numeric_cols = df[['ImportCostUSD', 'SellingPriceUSD', 'ProfitUSD', 
+                              'ProfitMargin', 'DemandScore', 'OpportunityScore']].copy()
+            
+            corr_matrix = numeric_cols.corr()
+            
+            fig = go.Figure(data=go.Heatmap(
+                z=corr_matrix.values,
+                x=corr_matrix.columns,
+                y=corr_matrix.columns,
+                colorscale='RdBu',
+                zmid=0,
+                text=np.round(corr_matrix.values, 2),
+                texttemplate='%{text}',
+                textfont={"size": 10},
+                colorbar=dict(title="Correlation")
+            ))
+            fig.update_layout(title='Correlation Matrix: Trade Metrics', height=600, width=700)
+            return fig
+        except Exception as e:
+            st.warning(f"Heatmap creation failed: {e}")
+            return None
+    
+    @staticmethod
+    def create_box_whisker_plot(df: pd.DataFrame):
+        """Create box and whisker plot for profit distribution by category"""
+        try:
+            fig = px.box(df, 
+                        x='Category',
+                        y='ProfitUSD',
+                        color='RiskLevel',
+                        points='outliers',
+                        title='Profit Distribution by Category & Risk Level',
+                        labels={'ProfitUSD': 'Profit (USD)', 'Category': 'Product Category'})
+            fig.update_layout(height=500)
+            return fig
+        except Exception as e:
+            st.warning(f"Box plot creation failed: {e}")
+            return None
+    
+    @staticmethod
+    def create_violin_plot(df: pd.DataFrame):
+        """Create violin plot for margin distribution"""
+        try:
+            fig = px.violin(df,
+                          x='Category',
+                          y='ProfitMargin',
+                          color='Category',
+                          points='all',
+                          title='Profit Margin Distribution by Category',
+                          labels={'ProfitMargin': 'Profit Margin (%)'})
+            fig.update_layout(height=500, showlegend=False)
+            return fig
+        except Exception as e:
+            st.warning(f"Violin plot creation failed: {e}")
+            return None
+    
+    @staticmethod
+    def create_scatter_3d(df: pd.DataFrame):
+        """Create 3D scatter plot"""
+        try:
+            df_sample = df.sample(min(1000, len(df))).copy()
+            
+            fig = px.scatter_3d(df_sample,
+                              x='ImportCostUSD',
+                              y='ProfitMargin',
+                              z='DemandScore',
+                              color='OpportunityScore',
+                              size='ProfitUSD',
+                              hover_name='ProductName',
+                              hover_data=['Category', 'SourceCountry'],
+                              color_continuous_scale='Plasma',
+                              title='3D Trade Space Analysis',
+                              labels={'ImportCostUSD': 'Cost',
+                                     'ProfitMargin': 'Margin',
+                                     'DemandScore': 'Demand',
+                                     'OpportunityScore': 'Opportunity'})
+            fig.update_layout(height=700)
+            return fig
+        except Exception as e:
+            st.warning(f"3D scatter plot creation failed: {e}")
+            return None
+    
+    @staticmethod
+    def create_waterfall_chart(df: pd.DataFrame, category: str = None):
+        """Create waterfall chart showing profit breakdown"""
+        try:
+            if category:
+                df_filtered = df[df['Category'] == category]
+            else:
+                df_filtered = df
+            
+            category_profits = df_filtered.groupby('Category')['ProfitUSD'].sum().sort_values(ascending=False).head(10)
+            
+            fig = go.Figure(go.Waterfall(
+                name="Profit",
+                orientation="v",
+                x=category_profits.index,
+                y=category_profits.values,
+                connector={"line": {"color": "rgba(63, 63, 63, 0.5)"}},
+                decreasing={"marker": {"color": "Lightpink"}},
+                increasing={"marker": {"color": "Lightgreen"}},
+                totals={"marker": {"color": "lightblue"}}
+            ))
+            fig.update_layout(title='Cumulative Profit by Category', 
+                            xaxis_title='Category',
+                            yaxis_title='Profit (USD)',
+                            height=500)
+            return fig
+        except Exception as e:
+            st.warning(f"Waterfall chart creation failed: {e}")
+            return None
+    
+    @staticmethod
+    def create_histogram_with_distribution(df: pd.DataFrame, column: str = 'ProfitMargin'):
+        """Create histogram with distribution curve"""
+        try:
+            fig = px.histogram(df,
+                             x=column,
+                             nbins=50,
+                             title=f'Distribution of {column}',
+                             labels={column: column},
+                             marginal='box',
+                             opacity=0.7,
+                             color_discrete_sequence=['steelblue'])
+            fig.update_layout(height=500)
+            return fig
+        except Exception as e:
+            st.warning(f"Histogram creation failed: {e}")
+            return None
+    
+    @staticmethod
+    def create_polar_chart(df: pd.DataFrame):
+        """Create polar area chart for category comparison"""
+        try:
+            category_stats = df.groupby('Category').agg({
+                'ProfitUSD': 'mean',
+                'DemandScore': 'mean',
+                'ProfitMargin': 'mean',
+                'ProductID': 'count'
+            }).reset_index()
+            
+            # Normalize values for better visualization
+            scaler = MinMaxScaler()
+            category_stats[['profit_norm', 'demand_norm', 'margin_norm']] = scaler.fit_transform(
+                category_stats[['ProfitUSD', 'DemandScore', 'ProfitMargin']]
+            )
+            
+            fig = px.bar_polar(category_stats,
+                             r='profit_norm',
+                             theta='Category',
+                             color='demand_norm',
+                             size='margin_norm',
+                             color_continuous_scale='Plasma',
+                             title='Category Performance Radar',
+                             labels={'profit_norm': 'Avg Profit'})
+            fig.update_layout(height=600)
+            return fig
+        except Exception as e:
+            st.warning(f"Polar chart creation failed: {e}")
+            return None
+    
+    @staticmethod
+    def create_treemap(df: pd.DataFrame):
+        """Create treemap for hierarchical visualization"""
+        try:
+            treemap_data = df.groupby(['Category', 'SourceCountry']).agg({
+                'ProfitUSD': 'sum',
+                'ProductID': 'count'
+            }).reset_index()
+            treemap_data.columns = ['Category', 'Country', 'Profit', 'Products']
+            
+            fig = px.treemap(treemap_data,
+                           labels=['All'] + treemap_data['Category'].tolist() + treemap_data['Country'].tolist(),
+                           parents=[''] + ['All']*len(treemap_data['Category'].unique()) + 
+                                  treemap_data['Category'].tolist(),
+                           values=[treemap_data['Profit'].sum()] + 
+                                 [treemap_data[treemap_data['Category']==cat]['Profit'].sum() 
+                                  for cat in treemap_data['Category'].unique()] +
+                                 treemap_data['Profit'].tolist(),
+                           color='Profit',
+                           color_continuous_scale='RdYlGn',
+                           title='Trade Volume Treemap: Category × Country')
+            fig.update_layout(height=700)
+            return fig
+        except Exception as e:
+            st.warning(f"Treemap creation failed: {e}")
+            return None
+    
+    @staticmethod
+    def create_funnel_chart(df: pd.DataFrame):
+        """Create funnel chart for opportunity stages"""
+        try:
+            funnel_data = pd.DataFrame({
+                'Stage': ['All Products', 'High Demand\n(Demand > 75)', 
+                         'Good Margin\n(Margin > 30%)', 'High Opportunity\n(Opp Score > 70)'],
+                'Count': [
+                    len(df),
+                    len(df[df['DemandScore'] > 75]),
+                    len(df[df['ProfitMargin'] > 30]),
+                    len(df[df['OpportunityScore'] > 70])
+                ]
+            })
+            
+            fig = px.funnel(funnel_data, 
+                          x='Count', 
+                          y='Stage',
+                          title='Sales Funnel: Product Opportunity Stages',
+                          color_discrete_sequence=['#636EFA'])
+            fig.update_layout(height=500)
+            return fig
+        except Exception as e:
+            st.warning(f"Funnel chart creation failed: {e}")
+            return None
+
+
+# =============================
 # MACHINE LEARNING & AI TOOLS
 # =============================
 
@@ -560,6 +888,109 @@ def page_export_intel(exports_df: pd.DataFrame):
 
 
 # =============================
+# ADVANCED VISUALIZATION PAGE
+# =============================
+
+def page_advanced_analytics(df: pd.DataFrame):
+    """New page with all advanced charts"""
+    st.subheader("📊 Advanced Data Analytics Dashboard")
+    
+    chart_type = st.selectbox(
+        "Select visualization type:",
+        [
+            "Sankey Diagram (Trade Flow)",
+            "Sunburst Chart (Hierarchical)",
+            "Bubble Chart (4D Analysis)",
+            "Correlation Heatmap",
+            "Box & Whisker Plot",
+            "Violin Plot",
+            "3D Scatter Plot",
+            "Waterfall Chart",
+            "Histogram with Distribution",
+            "Polar Chart (Radar)",
+            "Treemap",
+            "Funnel Chart"
+        ]
+    )
+    
+    st.markdown("---")
+    
+    if chart_type == "Sankey Diagram (Trade Flow)":
+        st.write("**Sankey Diagram**: Shows trade flow from source countries through product categories")
+        fig = AdvancedCharts.create_sankey_diagram(df)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "Sunburst Chart (Hierarchical)":
+        st.write("**Sunburst Chart**: Hierarchical view of countries and product categories with profit margins")
+        fig = AdvancedCharts.create_sunburst_chart(df)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "Bubble Chart (4D Analysis)":
+        st.write("**Bubble Chart**: 4 dimensions - X: Import Cost, Y: Profit Margin, Size: Demand, Color: Opportunity")
+        fig = AdvancedCharts.create_bubble_chart(df)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "Correlation Heatmap":
+        st.write("**Correlation Matrix**: Shows relationships between key trade metrics")
+        fig = AdvancedCharts.create_heatmap(df)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "Box & Whisker Plot":
+        st.write("**Box Plot**: Shows profit distribution by category and risk level, with outliers highlighted")
+        fig = AdvancedCharts.create_box_whisker_plot(df)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "Violin Plot":
+        st.write("**Violin Plot**: Shows profit margin distribution density by category")
+        fig = AdvancedCharts.create_violin_plot(df)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "3D Scatter Plot":
+        st.write("**3D Scatter**: Visualize trade data in 3D space - Cost, Margin, and Demand")
+        fig = AdvancedCharts.create_scatter_3d(df)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "Waterfall Chart":
+        st.write("**Waterfall Chart**: Cumulative profit breakdown by product category")
+        fig = AdvancedCharts.create_waterfall_chart(df)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "Histogram with Distribution":
+        col1, col2 = st.columns(2)
+        with col1:
+            metric = st.selectbox("Select metric:", ["ProfitMargin", "ProfitUSD", "ImportCostUSD", "DemandScore"])
+        fig = AdvancedCharts.create_histogram_with_distribution(df, metric)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "Polar Chart (Radar)":
+        st.write("**Polar Chart**: Category performance comparison in radar format")
+        fig = AdvancedCharts.create_polar_chart(df)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "Treemap":
+        st.write("**Treemap**: Hierarchical view of trade volume by category and country")
+        fig = AdvancedCharts.create_treemap(df)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    elif chart_type == "Funnel Chart":
+        st.write("**Funnel Chart**: Product opportunity pipeline from all products through high-opportunity products")
+        fig = AdvancedCharts.create_funnel_chart(df)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+
+
+# =============================
 # ML-POWERED PAGES
 # =============================
 
@@ -847,6 +1278,9 @@ else:
             "High Opportunity Products",
             "Export Intelligence",
         ],
+        "📈 Advanced Analytics": [
+            "Advanced Charts Dashboard",
+        ],
         "🤖 AI & ML Tools": [
             "Price Predictor",
             "Market Segmentation",
@@ -884,6 +1318,8 @@ else:
         page_opportunities(df)
     elif st.session_state.menu == "Export Intelligence":
         page_export_intel(exports_df)
+    elif st.session_state.menu == "Advanced Charts Dashboard":
+        page_advanced_analytics(df)
     elif st.session_state.menu == "Price Predictor":
         page_price_predictor(df)
     elif st.session_state.menu == "Market Segmentation":
