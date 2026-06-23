@@ -103,6 +103,61 @@ if 'exports_df' not in globals():
 if not os.path.exists("product_images"):
     os.makedirs("product_images")
 
+# --- Ensure DB schema exists early so pages can use it ---
+def ensure_schema():
+    conn = sqlite3.connect("afibuy.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fullname TEXT,
+        email TEXT UNIQUE,
+        password TEXT,
+        role TEXT
+    )
+    """)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS products(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        seller_email TEXT,
+        product_name TEXT,
+        category TEXT,
+        price REAL,
+        description TEXT,
+        image TEXT
+    )
+    """)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS cart(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        buyer_email TEXT,
+        product_id INTEGER,
+        quantity INTEGER
+    )
+    """)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS orders(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        buyer_email TEXT,
+        total REAL,
+        status TEXT
+    )
+    """)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS order_items(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER,
+        product_id INTEGER,
+        quantity INTEGER,
+        price REAL
+    )
+    """)
+    conn.commit()
+    conn.close()
+
+# Call early to ensure tables exist before any page logic runs
+ensure_schema()
+
 # --- UI: Login flow and navigation ---
 
 def show_login():
@@ -206,15 +261,35 @@ def page_add_product():
             image_path = os.path.join("product_images", image.name)
             with open(image_path, "wb") as f:
                 f.write(image.getbuffer())
-        # simple DB insert
-        conn = sqlite3.connect("afibuy.db")
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO products(seller_email,product_name,category,price,description,image) VALUES(?,?,?,?,?)
-        """, (st.session_state.email, product_name, category, price, description, image_path))
-        conn.commit()
-        conn.close()
-        st.success("Product Added Successfully")
+        # simple DB insert with error handling and recovery
+        try:
+            conn = sqlite3.connect("afibuy.db")
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO products(seller_email,product_name,category,price,description,image) VALUES(?,?,?,?,?)
+            """, (st.session_state.email, product_name, category, price, description, image_path))
+            conn.commit()
+            conn.close()
+            st.success("Product Added Successfully")
+        except sqlite3.OperationalError as e:
+            # If table missing or other operational error, try to recreate schema and retry once
+            st.warning("Database operational error encountered — attempting to recreate tables and retry.")
+            ensure_schema()
+            try:
+                conn = sqlite3.connect("afibuy.db")
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO products(seller_email,product_name,category,price,description,image) VALUES(?,?,?,?,?)
+                """, (st.session_state.email, product_name, category, price, description, image_path))
+                conn.commit()
+                conn.close()
+                st.success("Product Added Successfully")
+            except Exception as e2:
+                st.error("Failed to add product after recovery attempt.")
+                st.exception(e2)
+        except Exception as e:
+            st.error("Unexpected error while adding product.")
+            st.exception(e)
 
 
 def page_products_list():
@@ -273,58 +348,3 @@ else:
     # small footer
     st.markdown("---")
     st.caption(f"Logged in as: {st.session_state.email}")
-
-# ensure afibuy.db schema exists (safe to run)
-
-def ensure_schema():
-    conn = sqlite3.connect("afibuy.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fullname TEXT,
-        email TEXT UNIQUE,
-        password TEXT,
-        role TEXT
-    )
-    """)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS products(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        seller_email TEXT,
-        product_name TEXT,
-        category TEXT,
-        price REAL,
-        description TEXT,
-        image TEXT
-    )
-    """)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS cart(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        buyer_email TEXT,
-        product_id INTEGER,
-        quantity INTEGER
-    )
-    """)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS orders(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        buyer_email TEXT,
-        total REAL,
-        status TEXT
-    )
-    """)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS order_items(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id INTEGER,
-        product_id INTEGER,
-        quantity INTEGER,
-        price REAL
-    )
-    """)
-    conn.commit()
-    conn.close()
-
-ensure_schema()
