@@ -12,7 +12,7 @@ from pathlib import Path
 # App configuration
 # -----------------------------
 st.set_page_config(page_title="Afibuy", layout="wide")
-APP_TITLE = "🌍 Afibuy 🇱🇷"
+APP_TITLE = "🌍 Afibuy"
 DATA_CSV = "Liberia_Global_Trade_Enhanced.csv"
 AFIBUY_DB = "afibuy.db"
 PRODUCT_IMAGES_DIR = Path("product_images")
