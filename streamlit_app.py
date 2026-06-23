@@ -1,8 +1,8 @@
 import streamlit as st
 
-st. title("🌍Afibuy🇱🇷")
-st. write("Welcome to Afibuy - Liberia Global Trade Intelligence Platform")
 st.set_page_config(page_title="Afibuy", layout="wide")
+st.title("🌍Afibuy🇱🇷")
+st.write("Welcome to Afibuy - Liberia Global Trade Intelligence Platform")
 # Afibuy Liberia Global Trade Intelligence Platform
 """
 
@@ -372,7 +372,7 @@ fig = px.bar(
 
 st.plotly_chart(
     fig,
-    width='stretch'
+    use_container_width=True
 )
 
 ### PORT ANALYTICS
@@ -499,11 +499,11 @@ print(
 ### TOP LIBERIAN EXPORTS
 top_exports = (
     exports_df.groupby("Product")
-    ["ExportValueUSD"]
-    .sum()
-    .sort_values(
-        ascending=False
-    )
+      ["ExportValueUSD"]
+      .sum()
+      .sort_values(
+          ascending=False
+      )
 )
 
 top_exports
@@ -512,7 +512,7 @@ top_exports
 
 """### Consolidated Streamlit App Structure
 
-This cell demonstrates how all the individual Streamlit components from the previous cells would typically be combined into a single Python script for a Streamlit application. It uses `st.sidebar.selectbox` for navigation and `if-elif-else` statements to display different sections of the dashboard.
+This cell demonstrates how all the individual Streamlit components from the previous cells would typically be combined into a single Python script for a Streamlit application. It uses st.sidebar for navigation.
 """
 
 import streamlit as st
@@ -586,7 +586,7 @@ elif menu == "Top Countries Exporting To Liberia":
 
     st.plotly_chart(
         fig,
-        width='stretch'
+        use_container_width=True
     )
 
 elif menu == "Liberia Port Analytics":
@@ -610,7 +610,7 @@ elif menu == "Liberia Port Analytics":
 
     st.plotly_chart(
         fig,
-        width='stretch'
+        use_container_width=True
     )
 
 elif menu == "High Opportunity Products":
@@ -650,9 +650,9 @@ elif menu == "Export Intelligence":
 
     export_summary = (
         exports_df.groupby("Product")
-        ["ExportValueUSD"]
-        .sum()
-        .reset_index()
+          ["ExportValueUSD"]
+          .sum()
+          .reset_index()
     )
 
     fig = px.bar(
@@ -664,7 +664,7 @@ elif menu == "Export Intelligence":
 
     st.plotly_chart(
         fig,
-        width='stretch'
+        use_container_width=True
     )
 
 st.subheader(
@@ -1039,7 +1039,8 @@ st.metric(
 # 
 #             st.write("Seller:",product[1])
 
-"""Now, let's run the Streamlit app and expose it using `ngrok`. You'll need an `NGROK_AUTH_TOKEN`. If you don't have one, get it from [ngrok dashboard](https://dashboard.ngrok.com/get-started/your-authtoken). Add it to the Colab secrets manager under the "🔑" in the left panel, named `NGROK_AUTH_TOKEN`."""
+"""Now, let's run the Streamlit app and expose it using ngrok. You'll need an NGROK_AUTH_TOKEN. If you don't have one, get it from ngrok dashboard.
+"""
 
 import subprocess
 import threading
@@ -1215,9 +1216,9 @@ def create_database():
 
 create_database()
 
-"""### Migrate Existing Trade Data to `afibuy.db`
+"""### Migrate Existing Trade Data to afibuy.db
 
-Now that `afibuy.db` has been created, we will move the existing `liberia_trade_data` (currently in `df`) and `liberia_exports` (currently in `exports_df`) into this new database. We'll store them as `trade_data` and `exports_data` tables within `afibuy.db`.
+Now that afibuy.db has been created, we will move the existing liberia_trade_data (currently in df) and liberia_exports (currently in exports_df) into this new database.
 """
 
 import sqlite3
@@ -1397,7 +1398,7 @@ CREATE TABLE IF NOT EXISTS order_items(
 conn.commit()
 conn.close()
 
-"""### Replacing the Database: Re-creating and Populating `afibuy.db`"""
+"""### Replacing the Database: Re-creating and Populating afibuy.db"""
 
 import sqlite3
 
@@ -1521,4 +1522,3 @@ def create_and_populate_database():
     print("Database 'afibuy.db' recreated, schema applied, and data populated successfully.")
 
 create_and_populate_database()
-
