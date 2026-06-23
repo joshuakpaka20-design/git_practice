@@ -4,7 +4,6 @@ st. title("🌍Afibuy🇱🇷")
 st. write("Welcome to Afibuy - Liberia Global Trade Intelligence Platform")
 st.set_page_config(page_title="Afibuy", layout="wide")
 # Afibuy Liberia Global Trade Intelligence Platform
-Google Colab notebook template.
 """
 
 !pip install streamlit pandas numpy plotly scikit-learn reportlab pyngrok
