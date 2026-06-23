@@ -693,8 +693,6 @@ st.metric(
 ### create the streamlit link for the website:
 !streamlit run app.py & npx localtunnel --port 8501
 
-#"""First, let's write the Streamlit application code into a Python file named `app.py`."""
-
 # Commented out IPython magic to ensure Python compatibility.
 # %%writefile app.py
 # import streamlit as st
