@@ -5,8 +5,30 @@ import sqlite3
 import random
 import os
 import plotly.express as px
+import plotly.graph_objects as go
 import hashlib
 from pathlib import Path
+from datetime import datetime, timedelta
+import warnings
+warnings.filterwarnings('ignore')
+
+# Machine Learning imports
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.decomposition import PCA
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.preprocessing import MinMaxScaler
+import joblib
+
+# NLP for recommendations
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+# Statistics
+from scipy import stats
+
+# Caching for ML models
+from functools import lru_cache
 
 # -----------------------------
 # App configuration
@@ -17,6 +39,8 @@ DATA_CSV = "Liberia_Global_Trade_Enhanced.csv"
 AFIBUY_DB = "afibuy.db"
 PRODUCT_IMAGES_DIR = Path("product_images")
 PRODUCT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+MODELS_DIR = Path("models")
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 # -----------------------------
 # Helpers: DB, auth, utilities
@@ -33,7 +57,6 @@ def ensure_schema():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Create users table if it doesn't exist
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS users(
@@ -46,14 +69,13 @@ def ensure_schema():
         """
     )
     
-    # Migration: Add password_hash column if it doesn't exist
     cursor.execute("PRAGMA table_info(users)")
     columns = [col[1] for col in cursor.fetchall()]
     if 'password_hash' not in columns:
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
         except sqlite3.OperationalError:
-            pass  # Column already exists or other issue
+            pass
 
     cursor.execute(
         """
@@ -115,9 +137,173 @@ def verify_password(password: str, password_hash: str) -> bool:
     return hash_password(password) == password_hash
 
 
-# -----------------------------
-# Data generation / caching
-# -----------------------------
+# =============================
+# MACHINE LEARNING & AI TOOLS
+# =============================
+
+class MLPipeline:
+    """Unified ML pipeline for predictions and recommendations"""
+    
+    def __init__(self, df: pd.DataFrame):
+        self.df = df.copy()
+        self.scaler = StandardScaler()
+        self.price_model = None
+        self.demand_model = None
+        self.clusters = None
+        self.pca = None
+        
+    def train_price_predictor(self):
+        """Train RandomForest to predict selling price based on features"""
+        try:
+            # Prepare features
+            X = self.df[['ImportCostUSD', 'ProfitMargin', 'DemandScore']].fillna(0)
+            y = self.df['SellingPriceUSD'].fillna(0)
+            
+            self.price_model = RandomForestRegressor(n_estimators=50, max_depth=10, random_state=42)
+            self.price_model.fit(X, y)
+            return True
+        except Exception as e:
+            st.warning(f"Price predictor training failed: {e}")
+            return False
+    
+    def train_demand_predictor(self):
+        """Train RandomForest to predict product demand"""
+        try:
+            X = self.df[['ImportCostUSD', 'ProfitMargin', 'OpportunityScore']].fillna(0)
+            y = self.df['DemandScore'].fillna(0)
+            
+            self.demand_model = RandomForestRegressor(n_estimators=50, max_depth=10, random_state=42)
+            self.demand_model.fit(X, y)
+            return True
+        except Exception as e:
+            st.warning(f"Demand predictor training failed: {e}")
+            return False
+    
+    def predict_price(self, import_cost: float, profit_margin: float, demand_score: float) -> float:
+        """Predict selling price for a new product"""
+        if self.price_model is None:
+            self.train_price_predictor()
+        
+        X = np.array([[import_cost, profit_margin, demand_score]])
+        return max(0, self.price_model.predict(X)[0])
+    
+    def predict_demand(self, import_cost: float, profit_margin: float, opportunity_score: float) -> float:
+        """Predict demand score"""
+        if self.demand_model is None:
+            self.train_demand_predictor()
+        
+        X = np.array([[import_cost, profit_margin, opportunity_score]])
+        return max(0, min(100, self.demand_model.predict(X)[0]))
+    
+    def segment_products(self, n_clusters: int = 5):
+        """Cluster products into market segments"""
+        try:
+            X = self.df[['ImportCostUSD', 'ProfitMargin', 'DemandScore', 'OpportunityScore']].fillna(0)
+            X_scaled = self.scaler.fit_transform(X)
+            
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            self.clusters = kmeans.fit_predict(X_scaled)
+            
+            self.df['Segment'] = self.clusters
+            return self.df
+        except Exception as e:
+            st.warning(f"Segmentation failed: {e}")
+            return self.df
+    
+    def get_product_recommendations(self, product_id: int, n_recommendations: int = 5):
+        """Recommend similar products using content-based filtering"""
+        try:
+            # Create features from product metadata
+            features = self.df[['ProfitMargin', 'DemandScore', 'OpportunityScore', 'ProfitUSD']].fillna(0)
+            features_scaled = self.scaler.fit_transform(features)
+            
+            # Calculate similarity
+            similarities = cosine_similarity([features_scaled[product_id]], features_scaled)[0]
+            
+            # Get top recommendations (excluding the product itself)
+            top_indices = np.argsort(similarities)[::-1][1:n_recommendations+1]
+            return self.df.iloc[top_indices]
+        except Exception as e:
+            st.warning(f"Recommendation failed: {e}")
+            return pd.DataFrame()
+    
+    def detect_anomalies(self):
+        """Detect unusual products (outliers) using statistical methods"""
+        df_copy = self.df.copy()
+        anomalies = []
+        
+        for col in ['ProfitMargin', 'DemandScore', 'ProfitUSD']:
+            z_scores = np.abs(stats.zscore(df_copy[col].fillna(0)))
+            anomaly_mask = z_scores > 3
+            anomalies.append(anomaly_mask)
+        
+        combined_anomaly = np.any(anomalies, axis=0)
+        df_copy['IsAnomaly'] = combined_anomaly
+        return df_copy[df_copy['IsAnomaly'] == True]
+    
+    def forecast_trends(self, category: str = None):
+        """Simple trend analysis and forecasting"""
+        try:
+            if category:
+                data = self.df[self.df['Category'] == category].copy()
+            else:
+                data = self.df.copy()
+            
+            # Sort by profit and calculate trend
+            data = data.sort_values('ProfitUSD')
+            trend_data = []
+            
+            for idx, row in data.iterrows():
+                trend_data.append({
+                    'ProductName': row['ProductName'],
+                    'Category': row['Category'],
+                    'CurrentProfit': row['ProfitUSD'],
+                    'PredictedGrowth': row['OpportunityScore'] * (row['DemandScore'] / 100),
+                    'RiskLevel': row['RiskLevel']
+                })
+            
+            return pd.DataFrame(trend_data)
+        except Exception as e:
+            st.warning(f"Trend forecasting failed: {e}")
+            return pd.DataFrame()
+    
+    def optimize_supplier_mix(self, budget: float):
+        """Recommend optimal supplier mix based on profit & risk"""
+        try:
+            # Score products on efficiency (profit per cost unit)
+            df_copy = self.df.copy()
+            df_copy['Efficiency'] = df_copy['ProfitUSD'] / (df_copy['ImportCostUSD'] + 1)
+            df_copy = df_copy.sort_values('Efficiency', ascending=False)
+            
+            selected = []
+            remaining_budget = budget
+            
+            for _, row in df_copy.iterrows():
+                if remaining_budget >= row['ImportCostUSD']:
+                    selected.append(row)
+                    remaining_budget -= row['ImportCostUSD']
+            
+            if selected:
+                return pd.DataFrame(selected)[['ProductName', 'Category', 'ImportCostUSD', 'ProfitUSD', 'Efficiency']]
+            return pd.DataFrame()
+        except Exception as e:
+            st.warning(f"Optimization failed: {e}")
+            return pd.DataFrame()
+
+
+def get_ml_pipeline(df: pd.DataFrame) -> MLPipeline:
+    """Get or create ML pipeline (with caching)"""
+    if 'ml_pipeline' not in st.session_state:
+        pipeline = MLPipeline(df)
+        pipeline.train_price_predictor()
+        pipeline.train_demand_predictor()
+        st.session_state.ml_pipeline = pipeline
+    return st.session_state.ml_pipeline
+
+
+# =============================
+# DATA GENERATION / CACHING
+# =============================
 
 @st.cache_data(show_spinner=False)
 def load_or_generate_data(csv_path: str = DATA_CSV, n_records: int = 20000):
@@ -127,10 +313,8 @@ def load_or_generate_data(csv_path: str = DATA_CSV, n_records: int = 20000):
             df = pd.read_csv(csv_path)
             return df
         except Exception:
-            # fallback to regenerate if CSV corrupted
             pass
 
-    # generate smaller but realistic dataset
     source_countries = [
         "China", "India", "United States", "Germany", "Turkey",
         "Brazil", "Vietnam", "Netherlands", "Belgium", "Morocco",
@@ -172,7 +356,6 @@ def load_or_generate_data(csv_path: str = DATA_CSV, n_records: int = 20000):
         "ImportCostUSD", "SellingPriceUSD", "ProfitUSD", "ProfitMargin"
     ])
 
-    # enhance
     supplier_names = [
         "Liberia Trade Hub", "Monrovia Imports", "Global Trade Africa", "West Africa Commerce",
         "Prime Suppliers Ltd", "Atlantic Trading Group", "Ocean Gate Imports", "Liberty Logistics",
@@ -183,7 +366,6 @@ def load_or_generate_data(csv_path: str = DATA_CSV, n_records: int = 20000):
 
     df["HSCode"] = [random.randint(100000, 999999) for _ in range(len(df))]
     df["DemandScore"] = [random.randint(50, 100) for _ in range(len(df))]
-    # RiskLevel based on ProfitMargin (more realistic mapping)
     df["RiskLevel"] = [
         "Low Risk" if m >= 30 else ("Medium Risk" if m >= 10 else "High Risk")
         for m in df["ProfitMargin"]
@@ -194,13 +376,11 @@ def load_or_generate_data(csv_path: str = DATA_CSV, n_records: int = 20000):
     df["SupplierName"] = [random.choice(supplier_names) for _ in range(len(df))]
     df["Port"] = [random.choice(ports) for _ in range(len(df))]
 
-    # persist a CSV so subsequent runs are faster
     try:
         df.to_csv(csv_path, index=False)
     except Exception:
         pass
 
-    # also store a light table into sqlite for product browsing
     try:
         conn = sqlite3.connect(AFIBUY_DB)
         df.head(5000).to_sql("liberia_trade_data", conn, if_exists="replace", index=False)
@@ -212,7 +392,6 @@ def load_or_generate_data(csv_path: str = DATA_CSV, n_records: int = 20000):
     return df
 
 
-# load exports sample (cached implicitly by load_or_generate_data)
 @st.cache_data(show_spinner=False)
 def generate_exports_sample(n_records: int = 5000):
     liberia_exports = ["Rubber", "Iron Ore", "Gold", "Diamonds", "Palm Oil", "Cocoa", "Coffee", "Timber", "Cassava", "Fish"]
@@ -222,12 +401,12 @@ def generate_exports_sample(n_records: int = 5000):
         destination = random.choice(["China", "United States", "Germany", "Belgium", "India", "Morocco", "Turkey"])
         export_value = round(random.uniform(1000, 100000), 2)
         export_rows.append([i + 1, product, "Liberia", destination, export_value])
-    return pd.DataFrame(export_rows, columns=["ExportID", "Product", "Origin", "Destination", "ExportValueUSD"]) 
+    return pd.DataFrame(export_rows, columns=["ExportID", "Product", "Origin", "Destination", "ExportValueUSD"])
 
 
-# -----------------------------
+# =============================
 # UI: Authentication
-# -----------------------------
+# =============================
 
 ensure_schema()
 
@@ -240,7 +419,7 @@ if 'menu' not in st.session_state:
 
 
 st.title(APP_TITLE)
-st.write("Welcome to Afibuy - Liberia Global Trade Intelligence Platform")
+st.write("Welcome to Afibuy - Liberia Global Trade Intelligence Platform with AI-Powered Recommendations")
 
 
 def register_user(fullname: str, email: str, password: str) -> tuple[bool, str]:
@@ -315,9 +494,9 @@ def show_login():
             st.success("Continuing as guest")
 
 
-# -----------------------------
-# Page implementations
-# -----------------------------
+# =============================
+# PAGE IMPLEMENTATIONS
+# =============================
 
 def page_overview(df: pd.DataFrame):
     st.subheader("🇱🇷 Liberia Trade Overview")
@@ -332,7 +511,6 @@ def page_overview(df: pd.DataFrame):
         st.metric("Suppliers", df['SupplierName'].nunique())
 
     st.markdown("---")
-    # Top countries
     st.subheader("🌍 Top Countries Exporting To Liberia")
     country_df = df.groupby("SourceCountry")["ProductID"].count().reset_index(name="Products")
     fig = px.bar(country_df.sort_values("Products", ascending=False).head(20), x="SourceCountry", y="Products", title="Imports Into Liberia")
@@ -379,6 +557,176 @@ def page_export_intel(exports_df: pd.DataFrame):
     export_summary = exports_df.groupby("Product")["ExportValueUSD"].sum().reset_index()
     fig = px.bar(export_summary.sort_values("ExportValueUSD", ascending=False).head(20), x="Product", y="ExportValueUSD", title="Top Liberian Exports")
     st.plotly_chart(fig, use_container_width=True)
+
+
+# =============================
+# ML-POWERED PAGES
+# =============================
+
+def page_price_predictor(df: pd.DataFrame):
+    """Predict product pricing using ML"""
+    st.subheader("🤖 AI Price Predictor")
+    st.write("Predict optimal selling price based on import cost and market demand")
+    
+    pipeline = get_ml_pipeline(df)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        import_cost = st.number_input("Import Cost (USD)", min_value=0.0, value=100.0)
+    with col2:
+        profit_margin = st.number_input("Target Profit Margin (%)", min_value=0.0, max_value=200.0, value=50.0)
+    with col3:
+        demand_score = st.number_input("Demand Score (0-100)", min_value=0, max_value=100, value=70)
+    
+    if st.button("Predict Price"):
+        predicted_price = pipeline.predict_price(import_cost, profit_margin, demand_score)
+        st.success(f"💰 Predicted Selling Price: **${predicted_price:,.2f}**")
+        
+        # Show analysis
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.metric("Expected Profit", f"${predicted_price - import_cost:,.2f}")
+        with col_b:
+            actual_margin = ((predicted_price - import_cost) / import_cost * 100) if import_cost > 0 else 0
+            st.metric("Actual Margin", f"{actual_margin:.2f}%")
+
+
+def page_product_segmentation(df: pd.DataFrame):
+    """View ML-based product segments"""
+    st.subheader("📊 Market Segmentation Analysis")
+    st.write("Products grouped into market segments using AI clustering")
+    
+    pipeline = get_ml_pipeline(df)
+    n_clusters = st.slider("Number of Segments", 3, 10, 5)
+    
+    if st.button("Segment Products"):
+        segmented_df = pipeline.segment_products(n_clusters=n_clusters)
+        
+        # Visualize segments
+        fig = px.scatter(segmented_df, 
+                        x='ImportCostUSD', 
+                        y='ProfitUSD',
+                        color='Segment',
+                        size='OpportunityScore',
+                        hover_name='ProductName',
+                        title='Product Market Segments')
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Show segment statistics
+        st.subheader("Segment Statistics")
+        segment_stats = segmented_df.groupby('Segment').agg({
+            'ProductID': 'count',
+            'ProfitMargin': 'mean',
+            'DemandScore': 'mean',
+            'ProfitUSD': 'mean'
+        }).round(2)
+        segment_stats.columns = ['Product Count', 'Avg Margin %', 'Avg Demand', 'Avg Profit']
+        st.dataframe(segment_stats)
+
+
+def page_recommendations(df: pd.DataFrame):
+    """Get ML-powered recommendations"""
+    st.subheader("✨ Smart Product Recommendations")
+    st.write("Find similar products based on AI analysis")
+    
+    pipeline = get_ml_pipeline(df)
+    
+    selected_product = st.selectbox(
+        "Select a product",
+        options=df['ProductName'].unique(),
+        key="rec_product"
+    )
+    
+    if selected_product:
+        product_idx = df[df['ProductName'] == selected_product].index[0]
+        recommendations = pipeline.get_product_recommendations(product_idx, n_recommendations=5)
+        
+        if not recommendations.empty:
+            st.subheader(f"Products Similar to '{selected_product}':")
+            rec_display = recommendations[['ProductName', 'Category', 'SourceCountry', 'ProfitMargin', 'OpportunityScore']]
+            st.dataframe(rec_display)
+        else:
+            st.info("No recommendations found")
+
+
+def page_trend_forecasting(df: pd.DataFrame):
+    """Forecast market trends"""
+    st.subheader("📈 Market Trend Forecasting")
+    st.write("AI-powered predictions of market movements and growth potential")
+    
+    pipeline = get_ml_pipeline(df)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        category_filter = st.selectbox("Category", options=["All"] + df['Category'].unique().tolist())
+    with col2:
+        show_anomalies = st.checkbox("Show Anomalies", value=False)
+    
+    if category_filter == "All":
+        forecast_df = pipeline.forecast_trends()
+    else:
+        forecast_df = pipeline.forecast_trends(category=category_filter)
+    
+    if not forecast_df.empty:
+        forecast_df = forecast_df.sort_values('PredictedGrowth', ascending=False).head(20)
+        st.dataframe(forecast_df)
+        
+        # Visualize predictions
+        fig = px.bar(forecast_df, 
+                    x='ProductName', 
+                    y='PredictedGrowth',
+                    color='RiskLevel',
+                    title='Predicted Growth Potential by Product')
+        st.plotly_chart(fig, use_container_width=True)
+    
+    if show_anomalies:
+        st.subheader("🚨 Anomalous Products Detected")
+        anomalies = pipeline.detect_anomalies()
+        if not anomalies.empty:
+            st.warning(f"Found {len(anomalies)} unusual products")
+            st.dataframe(anomalies[['ProductName', 'Category', 'ProfitMargin', 'DemandScore']].head(10))
+
+
+def page_budget_optimizer(df: pd.DataFrame):
+    """Budget optimization tool"""
+    st.subheader("💼 Smart Budget Optimizer")
+    st.write("Get AI recommendations for optimal product selection given your budget")
+    
+    pipeline = get_ml_pipeline(df)
+    
+    budget = st.number_input("Your Budget (USD)", min_value=100.0, value=10000.0)
+    
+    if st.button("Optimize Budget"):
+        optimized = pipeline.optimize_supplier_mix(budget)
+        
+        if not optimized.empty:
+            st.success(f"✅ Recommended {len(optimized)} products")
+            
+            total_cost = optimized['ImportCostUSD'].sum()
+            total_profit = optimized['ProfitUSD'].sum()
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Products Selected", len(optimized))
+            with col2:
+                st.metric("Total Cost", f"${total_cost:,.2f}")
+            with col3:
+                st.metric("Expected Profit", f"${total_profit:,.2f}")
+            
+            st.subheader("Recommended Products")
+            st.dataframe(optimized)
+            
+            # Visualization
+            fig = px.scatter(optimized,
+                           x='ImportCostUSD',
+                           y='ProfitUSD',
+                           size='Efficiency',
+                           hover_name='ProductName',
+                           color='Category',
+                           title='Budget Optimization Results')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("No valid products found for optimization")
 
 
 def page_add_product():
@@ -442,7 +790,6 @@ def page_products_list():
             st.info("No products available yet. Add a product from the sidebar.")
             return
 
-        # simple filters
         cols = st.columns([3, 1])
         with cols[0]:
             search = st.text_input("Search product name or supplier")
@@ -458,7 +805,6 @@ def page_products_list():
 
         st.dataframe(filtered)
 
-        # show a gallery (first 6)
         st.markdown("---")
         st.write("Product gallery")
         for _, row in filtered.head(6).iterrows():
@@ -479,9 +825,9 @@ def page_products_list():
         conn.close()
 
 
-# -----------------------------
-# Main flow: load data and route pages
-# -----------------------------
+# =============================
+# MAIN FLOW
+# =============================
 
 df = load_or_generate_data()
 exports_df = generate_exports_sample()
@@ -490,31 +836,44 @@ if not st.session_state.logged_in:
     show_login()
     st.info("After logging in you'll see the Liberia Trade Overview by default. Use the sidebar to navigate to other pages.")
 else:
-    # sidebar navigation and actions
     st.sidebar.title("Navigation")
-    pages = [
-        "Liberia Trade Overview",
-        "Top Countries Exporting To Liberia",
-        "Liberia Port Analytics",
-        "High Opportunity Products",
-        "Export Intelligence",
-        "Add Product",
-        "Products List",
-    ]
-
-    st.session_state.menu = st.sidebar.selectbox("Choose a section", pages, index=pages.index(st.session_state.menu) if st.session_state.menu in pages else 0)
+    
+    # Organize pages by category
+    pages_dict = {
+        "📊 Trade Analytics": [
+            "Liberia Trade Overview",
+            "Top Countries Exporting To Liberia",
+            "Liberia Port Analytics",
+            "High Opportunity Products",
+            "Export Intelligence",
+        ],
+        "🤖 AI & ML Tools": [
+            "Price Predictor",
+            "Market Segmentation",
+            "Product Recommendations",
+            "Trend Forecasting",
+            "Budget Optimizer",
+        ],
+        "🛍️ E-Commerce": [
+            "Add Product",
+            "Products List",
+        ],
+    }
+    
+    # Create select menu
+    page_category = st.sidebar.radio("Category", pages_dict.keys())
+    st.session_state.menu = st.sidebar.selectbox("Choose a section", pages_dict[page_category])
 
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
         st.session_state.email = ""
-        st.experimental_rerun()
+        st.rerun()
 
-    # quick product search box in sidebar
     st.sidebar.markdown("---")
     st.sidebar.write("Quick search")
     q = st.sidebar.text_input("Product or supplier")
 
-    # route to pages
+    # Route to pages
     if st.session_state.menu == "Liberia Trade Overview":
         page_overview(df)
     elif st.session_state.menu == "Top Countries Exporting To Liberia":
@@ -525,6 +884,16 @@ else:
         page_opportunities(df)
     elif st.session_state.menu == "Export Intelligence":
         page_export_intel(exports_df)
+    elif st.session_state.menu == "Price Predictor":
+        page_price_predictor(df)
+    elif st.session_state.menu == "Market Segmentation":
+        page_product_segmentation(df)
+    elif st.session_state.menu == "Product Recommendations":
+        page_recommendations(df)
+    elif st.session_state.menu == "Trend Forecasting":
+        page_trend_forecasting(df)
+    elif st.session_state.menu == "Budget Optimizer":
+        page_budget_optimizer(df)
     elif st.session_state.menu == "Add Product":
         page_add_product()
     elif st.session_state.menu == "Products List":
