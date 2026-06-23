@@ -32,6 +32,8 @@ def ensure_schema():
     """Create DB schema for users, products, cart, orders, etc."""
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # Create users table if it doesn't exist
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS users(
@@ -43,6 +45,15 @@ def ensure_schema():
         )
         """
     )
+    
+    # Migration: Add password_hash column if it doesn't exist
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'password_hash' not in columns:
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists or other issue
 
     cursor.execute(
         """
