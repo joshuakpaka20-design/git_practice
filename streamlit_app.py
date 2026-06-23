@@ -4,7 +4,6 @@ st.set_page_config(page_title="Afibuy", layout="wide")
 st.title("🌍Afibuy🇱🇷")
 st.write("Welcome to Afibuy - Liberia Global Trade Intelligence Platform")
 # Afibuy Liberia Global Trade Intelligence Platform
-
 import pandas as pd
 import numpy as np
 import sqlite3
